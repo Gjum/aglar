@@ -53,7 +53,6 @@ def get_skin_tex(name, synchronous=False):
 
     return skin_texture_cache[name]
 
-print('GL vendor:', cast(gl.glGetString(gl.GL_VENDOR), c_char_p).value.decode())
 
 foo_size = Vec(1920, 1080)  # size of Zeach's monitor
 win_size = foo_size / 2
@@ -81,6 +80,7 @@ def on_resize(width, height):
     gl.glViewport(0, 0, width, height)
     # projection gets recalculated before next draw
     win_size.set(width, height)
+    leaderboard_label.x, leaderboard_label.y = win_size
     return pyglet.event.EVENT_HANDLED
 
 
@@ -122,9 +122,9 @@ class CC(CustomCell):  # xxx testing
         self.name = name
 
 
-def screen_to_world(screen):
+def screen_to_world(screen_pos):
     scale = max(*win_size.vdiv(foo_size)) * client.player.scale
-    return (screen - win_size/2) / scale + client.player.center
+    return Vec(screen_pos - win_size / 2) / scale + client.player.center
 
 def set_world_projection():
     center = client.player.center
@@ -280,8 +280,8 @@ def draw_minimap():
          ('v2f', rect_corners(world.top_left, world.bottom_right)))
 
     # outline the area visible in window
-    pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
-         ('v2f', rect_corners(screen_to_world(Vec(0,0)),screen_to_world(win_size))))
+    pyglet.graphics.draw(4, gl.GL_LINE_LOOP, ('v2f', rect_corners(
+        screen_to_world(Vec(0,0)), screen_to_world(win_size))))
 
     shader_circle_tex.bind()
     batch.draw()
@@ -297,9 +297,9 @@ def on_draw():
     # world border
     gl.glLineWidth(1)
     pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
-                         ('v2f', rect_corners(client.player.world.top_left,
-                                              client.player.world.bottom_right)),
-                         ('c4f', tuple([1.,1.,1., .1]*4)))
+        ('v2f', rect_corners(client.player.world.top_left,
+                             client.player.world.bottom_right)),
+        ('c4f', tuple([1.,1.,1., .1]*4)))
 
     # cells
 
@@ -359,11 +359,9 @@ def on_draw():
     # leaderboard
     leaderboard_text = '\n'.join('%s (%i)' % (name,pos+1) for pos,(id,name) in
                                  enumerate(client.world.leaderboard_names))
-    pyglet.text.Label(
-        leaderboard_text, font_size=15, multiline=True,
-        x=win_size.x, y=win_size.y,
-        width=win_size.x, align='right',
-        anchor_x='right', anchor_y='top').draw()
+    if leaderboard_label.text != leaderboard_text:
+        leaderboard_label.text = leaderboard_text  # causes recalculation
+    leaderboard_label.draw()
 
     # measure performance
     if show_fps:
@@ -380,6 +378,10 @@ def on_draw():
 show_text = False
 show_fps = True
 last_frame = time.time()
+
+leaderboard_label = pyglet.text.Label(
+    '', x=win_size.x, y=win_size.y, width=win_size.x, font_size=15,
+    multiline=True, align='right', anchor_x='right', anchor_y='top')
 
 @window.event
 def on_mouse_motion(x, y, dx, dy):
@@ -423,7 +425,7 @@ class Subscriber(object):
                                  % (self.__class__.__name__, func_name))
         return lambda *args, **kwargs: None  # default handler does nothing
 
-    def on_message_error(self, err):
+    def on_message_error(self, err):  # xxx
         raise ValueError(err)
 
     def on_world_update_post(self):
