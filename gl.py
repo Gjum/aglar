@@ -107,11 +107,57 @@ def rect(x, y, r, ry=None):
         x-r, y+ry,
     )
 
-
 class CustomCell(agarnet.world.Cell):
     def __init__(self, **kwargs):
         super(CustomCell, self).__init__(**kwargs)
 
+        self.name_label = pyglet.text.Label(
+            self.name, anchor_x='center', anchor_y='bottom',
+            x=self.pos.x, y=client.world.center.y - self.pos.y,
+            font_size=self.font_size)
+
+        self.info_label = pyglet.text.Label(
+            self.info_text, anchor_x='center', anchor_y='top',
+            x=self.pos.x, y=client.world.center.y - self.pos.y,
+            font_size=self.font_size)
+
+    def draw_text(self, name_batch=None, info_batch=None):
+        if self.is_food or self.is_ejected_mass:
+            return
+
+        if self.name and name_batch:
+            self.name_label.begin_update()
+            self.name_label.batch = name_batch
+            self.name_label.font_size = self.font_size
+            self.name_label.x = self.pos.x
+            self.name_label.y = client.world.center.y - self.pos.y
+            self.name_label.text = self.name
+            self.name_label.end_update()
+
+        if info_batch:
+            self.info_label.begin_update()
+            self.info_label.batch = info_batch
+            self.info_label.font_size = self.font_size
+            self.info_label.x = self.pos.x
+            self.info_label.y = client.world.center.y - self.pos.y
+            self.info_label.text = self.info_text
+            self.info_label.end_update()
+
+    @property
+    def font_size(self):
+        return max(15/client.player.scale, self.size/5)
+
+    @property
+    def info_text(self):
+        info = '%i' % self.mass
+        masses = [c.mass for c in client.player.own_cells if c.mass > 0]
+        if self not in client.player.own_cells and masses:
+            pct_min = 100 * self.mass / min(masses)
+            pct_max = 100 * self.mass / max(masses)
+            info += ' %i%%' % pct_min
+            if pct_min != pct_max:
+                info += ' %i%%' % pct_max
+        return info
 
 class CC(CustomCell):  # xxx testing
     def __init__(self, pos, size, color, name):
@@ -177,11 +223,13 @@ class CellDrawer(object):
         shader_circle_tex.unbind()
 
         # names + info
-        if show_text:
-            text_batch = pyglet.graphics.Batch()
-            for cell in self.cells:
-                self.draw_cell_text(cell, text_batch)
-            text_batch.draw()
+        cell_name_batch = pyglet.graphics.Batch()
+        cell_info_batch = pyglet.graphics.Batch()
+        for cell in self.cells:
+            cell.draw_text(show_cell_names and cell_name_batch,
+                           show_cell_info and cell_info_batch)
+        cell_name_batch.draw()
+        cell_info_batch.draw()
 
         # data changes every frame
         self.data.clear()
@@ -208,30 +256,6 @@ class CellDrawer(object):
 
         if texture:
             gl.glBindTexture(texture.target, 0)  # unbind
-
-    def draw_cell_text(self, cell, batch):
-        if cell.is_food or cell.is_ejected_mass:
-            return
-
-        font_size = max(15/client.player.scale, cell.size/5)
-        if cell.name:
-            pyglet.text.Label(
-                cell.name, batch=batch, font_size=font_size,
-                x=cell.pos.x, y=client.world.center.y - cell.pos.y,
-                anchor_x='center', anchor_y='bottom')
-
-        info = '%i' % cell.mass
-        masses = [c.mass for c in client.player.own_cells if c.mass > 0]
-        if cell not in client.player.own_cells and masses:
-            pct_min = 100 * cell.mass / min(masses)
-            pct_max = 100 * cell.mass / max(masses)
-            info += ' %i%%' % pct_min
-            if pct_min != pct_max:
-                info += ' %i%%' % pct_max
-        pyglet.text.Label(
-            info, batch=batch, font_size=font_size,
-            x=cell.pos.x, y=client.world.center.y - cell.pos.y,
-            anchor_x='center', anchor_y='top')
 
 
 def set_minimap_projection():
@@ -375,7 +399,8 @@ def on_draw():
             x=0, y=win_size.y,
             anchor_x='left', anchor_y='top').draw()
 
-show_text = False
+show_cell_names = True
+show_cell_info = True
 show_fps = True
 last_frame = time.time()
 
@@ -407,9 +432,12 @@ def on_key_press(symbol, modifiers):
     elif symbol == key.C:
         client.disconnect()
         client.connect(*find_server())
-    elif symbol == key.T:
-        global show_text
-        show_text = not show_text
+    elif symbol == key.N:
+        global show_cell_names
+        show_cell_names = not show_cell_names
+    elif symbol == key.I:
+        global show_cell_info
+        show_cell_info = not show_cell_info
     elif symbol == key.F3:
         global show_fps
         show_fps = not show_fps
