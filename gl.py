@@ -60,7 +60,7 @@ win_size = foo_size / 2
 
 target_win = Vec()  # window pos of mouse, from top left
 
-window = pyglet.window.Window(*map(int, win_size), caption="Circles",
+window = pyglet.window.Window(*map(int, win_size), caption="aGLar",
                               resizable=True, visible=False)
 
 shader_circle_tex = Shader(vert=[open('shaders/circle_tex.vert').read()],
@@ -112,30 +112,8 @@ class CustomCell(agarnet.world.Cell):
     def __init__(self, **kwargs):
         super(CustomCell, self).__init__(**kwargs)
 
-    def draw_name(self, batch):
-        font_size = max(15/client.player.scale, self.size/5)
-        if self.name:
-            pyglet.text.Label(
-                self.name, batch=batch, font_size=font_size,
-                x=self.pos.x, y=client.world.center.y - self.pos.y,
-                anchor_x='center', anchor_y='bottom')
 
-        if not self.is_food and not self.is_ejected_mass:
-            info = '%i' % self.mass
-            masses = [c.mass for c in client.player.own_cells if c.mass > 0]
-            if self not in client.player.own_cells and masses:
-                pct_min = 100 * self.mass / min(masses)
-                pct_max = 100 * self.mass / max(masses)
-                info += ' %i%%' % pct_min
-                if pct_min != pct_max:
-                    info += ' %i%%' % pct_max
-            pyglet.text.Label(
-                info, batch=batch, font_size=font_size,
-                x=self.pos.x, y=client.world.center.y - self.pos.y,
-                anchor_x='center', anchor_y='top')
-
-
-class CC(CustomCell):  # xxx
+class CC(CustomCell):  # xxx testing
     def __init__(self, pos, size, color, name):
         super().__init__()
         self.pos = Vec(pos)
@@ -144,8 +122,9 @@ class CC(CustomCell):  # xxx
         self.name = name
 
 
-def target_world():
-    return target_win - win_size/2 + client.player.center
+def screen_to_world(screen):
+    scale = max(*win_size.vdiv(foo_size)) * client.player.scale
+    return (screen - win_size/2) / scale + client.player.center
 
 def set_world_projection():
     center = client.player.center
@@ -155,9 +134,16 @@ def set_world_projection():
 
     gl.glMatrixMode(gl.GL_PROJECTION)
     gl.glLoadIdentity()
-    gl.glOrtho(center.x - horz_vp / s, center.x + horz_vp / s,
-               -center.y - vert_vp / s, -center.y + vert_vp / s,
+    gl.glOrtho(-horz_vp / s, horz_vp / s,
+               -vert_vp / s, vert_vp / s,
                -1,1)
+    gl.glTranslatef(-center.x, center.y, 0)
+    gl.glMatrixMode(gl.GL_MODELVIEW)
+
+def set_hud_projection():
+    gl.glMatrixMode(gl.GL_PROJECTION)
+    gl.glLoadIdentity()
+    gl.glOrtho(0, win_size.x, 0, win_size.y, -1, 1)
     gl.glMatrixMode(gl.GL_MODELVIEW)
 
 class CellDrawer(object):
@@ -182,17 +168,20 @@ class CellDrawer(object):
         colors.extend(color*4)
 
     def draw_all_cells(self):
+        set_world_projection()
+
         # circles
         shader_circle_tex.bind()
         for texture in self.data:
             self.draw_similar_cells(texture)
         shader_circle_tex.unbind()
 
-        # names
-        names_batch = pyglet.graphics.Batch()
-        for cell in self.cells:
-            cell.draw_name(names_batch)
-        names_batch.draw()
+        # names + info
+        if show_text:
+            text_batch = pyglet.graphics.Batch()
+            for cell in self.cells:
+                self.draw_cell_text(cell, text_batch)
+            text_batch.draw()
 
         # data changes every frame
         self.data.clear()
@@ -220,6 +209,84 @@ class CellDrawer(object):
         if texture:
             gl.glBindTexture(texture.target, 0)  # unbind
 
+    def draw_cell_text(self, cell, batch):
+        if cell.is_food or cell.is_ejected_mass:
+            return
+
+        font_size = max(15/client.player.scale, cell.size/5)
+        if cell.name:
+            pyglet.text.Label(
+                cell.name, batch=batch, font_size=font_size,
+                x=cell.pos.x, y=client.world.center.y - cell.pos.y,
+                anchor_x='center', anchor_y='bottom')
+
+        info = '%i' % cell.mass
+        masses = [c.mass for c in client.player.own_cells if c.mass > 0]
+        if cell not in client.player.own_cells and masses:
+            pct_min = 100 * cell.mass / min(masses)
+            pct_max = 100 * cell.mass / max(masses)
+            info += ' %i%%' % pct_min
+            if pct_min != pct_max:
+                info += ' %i%%' % pct_max
+        pyglet.text.Label(
+            info, batch=batch, font_size=font_size,
+            x=cell.pos.x, y=client.world.center.y - cell.pos.y,
+            anchor_x='center', anchor_y='top')
+
+
+def set_minimap_projection():
+    # third of window height, bottom-right corner
+    y = 3 * client.world.size.y
+    x = y / win_size.y * win_size.x
+    top_left = client.world.top_left
+
+    gl.glMatrixMode(gl.GL_PROJECTION)
+    gl.glLoadIdentity()
+    gl.glOrtho(0, x, -y, 0, -1, 1)
+    gl.glTranslatef(-top_left.x, top_left.y, 0)
+    gl.glMatrixMode(gl.GL_MODELVIEW)
+
+def draw_minimap():
+    if not client.world.size: return
+
+    set_minimap_projection()
+
+    vertices, colors = [],[]
+    num_cells = 0
+    for cell in client.player.world.cells.values():
+        if cell.is_food or cell.is_ejected_mass: continue
+        num_cells += 1
+
+        vertices.extend(rect(*cell.pos, r=cell.size))
+
+        color = list(cell.color)
+        color.append(1.0)  # xxx mark as hollow
+        colors.extend(color*4)
+
+    batch = pyglet.graphics.Batch()
+    batch.add(num_cells*4, gl.GL_QUADS, None,
+              ('v2f', vertices),
+              ('c4f', colors),
+              ('t2f', (0,0, 1,0, 1,1, 0,1)*num_cells))
+
+    world = client.player.world
+    # background
+    pyglet.graphics.draw(4, gl.GL_QUADS,
+         ('v2f', rect_corners(world.top_left, world.bottom_right)),
+         ('c4f', tuple([.2,.2,.2, .8]*4)))
+    # border
+    gl.glColor4f(.3,.3,.3, 1)
+    pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
+         ('v2f', rect_corners(world.top_left, world.bottom_right)))
+
+    # outline the area visible in window
+    pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
+         ('v2f', rect_corners(screen_to_world(Vec(0,0)),screen_to_world(win_size))))
+
+    shader_circle_tex.bind()
+    batch.draw()
+    shader_circle_tex.unbind()
+
 
 @window.event
 def on_draw():
@@ -227,23 +294,19 @@ def on_draw():
 
     set_world_projection()
 
-    # border
+    # world border
     gl.glLineWidth(1)
     pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
                          ('v2f', rect_corners(client.player.world.top_left,
                                               client.player.world.bottom_right)),
                          ('c4f', tuple([1.,1.,1., .1]*4)))
 
+    # cells
+
     # gather cell data, draw later using batch
     cell_drawer = CellDrawer()
 
     # xxx testing: frame with lying eight of varying nr of cells in window center
-
-    gl.glLineWidth(10)
-    pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
-                         ('v2f', rect(0,0, 1920 / 2, 1080 / 2)),
-                         ('c4f', tuple([1,0,1, .1]*4)))
-    gl.glLineWidth(1)
 
     import math
     eight_radius = 1920/2
@@ -260,7 +323,7 @@ def on_draw():
                       1080/1920 * eight_radius * math.sin(2*angle))  # lying eight
             pos += client.player.center
             cell_drawer.add_cell(CC(pos, size, (1.,.5,0.),
-                                     ('brazil', 'doge', 'sdfsd')[i % 3]))
+                                    ('brazil', 'doge', 'sdfsd')[i % 3]))
 
     # spam(int(time.time()*50) % 500, 200)
     # spam(9, 150)
@@ -268,29 +331,55 @@ def on_draw():
     # spam(200, 200)
     # spam(500, 5)
 
-
     # the real cells
     for c in sorted(client.player.world.cells.values()):
         cell_drawer.add_cell(c)
 
     cell_drawer.draw_all_cells()
 
-    # measure performance
-    global tt, fps
-    cells_per_frame.append(len(client.player.world.cells))
-    fps += 1
-    tn = time.time()
-    if tn - tt > 1:
-        min_cs, max_cs = min(cells_per_frame), max(cells_per_frame)
-        avg = sum(cells_per_frame) // len(cells_per_frame)
-        print(fps, 'fps,', min_cs, avg, max_cs)
-        tt += 1
-        fps = 0
-        cells_per_frame.clear()
+    draw_minimap()
 
-tt = time.time()
-fps = 0
-cells_per_frame = []
+    # HUD
+
+    set_hud_projection()
+
+    # mass graph
+    if mass_graph:
+        mass_verts = []
+        dx = win_size.x / 3 / len(mass_graph)
+        ay = win_size.y / 3 / max(mass_graph)
+        for i, mass in enumerate(mass_graph):
+            mass_verts.append(win_size.x * 2/3 + i * dx)
+            mass_verts.append(mass * ay)
+        gl.glLineWidth(3)
+        gl.glColor4f(0,0,1, 1)
+        pyglet.graphics.draw(len(mass_graph), gl.GL_LINE_STRIP, ('v2f', mass_verts))
+        gl.glLineWidth(1)
+
+    # leaderboard
+    leaderboard_text = '\n'.join('%s (%i)' % (name,pos+1) for pos,(id,name) in
+                                 enumerate(client.world.leaderboard_names))
+    pyglet.text.Label(
+        leaderboard_text, font_size=15, multiline=True,
+        x=win_size.x, y=win_size.y,
+        width=win_size.x, align='right',
+        anchor_x='right', anchor_y='top').draw()
+
+    # measure performance
+    if show_fps:
+        global last_frame
+        now = time.time()
+        frame_fps = 1/(now - last_frame)
+        last_frame = now
+
+        pyglet.text.Label(
+            '%.2f' % frame_fps, font_size=20, color=(255,255,0,255),
+            x=0, y=win_size.y,
+            anchor_x='left', anchor_y='top').draw()
+
+show_text = False
+show_fps = True
+last_frame = time.time()
 
 @window.event
 def on_mouse_motion(x, y, dx, dy):
@@ -307,14 +396,21 @@ def on_key_press(symbol, modifiers):
         client.send_spectate_toggle()
     elif symbol == key.R:
         client.send_respawn()
+        mass_graph.clear()
     elif symbol == key.W:
-        client.send_target(*target_world())
+        client.send_target(*screen_to_world(target_win))
         client.send_shoot()
     elif symbol == key.SPACE:
         client.send_split()
     elif symbol == key.C:
         client.disconnect()
         client.connect(*find_server())
+    elif symbol == key.T:
+        global show_text
+        show_text = not show_text
+    elif symbol == key.F3:
+        global show_fps
+        show_fps = not show_fps
 
 
 class Subscriber(object):
@@ -330,6 +426,12 @@ class Subscriber(object):
     def on_message_error(self, err):
         raise ValueError(err)
 
+    def on_world_update_post(self):
+        if client.player.is_alive:
+            mass_graph.append(client.player.total_mass)
+
+mass_graph = []
+
 def process_packets(client, timeout=0.001):
     # process all waiting packets, but do not block
     while True:
@@ -342,7 +444,7 @@ def process_packets(client, timeout=0.001):
             break  # no packet received
 
 def on_tick(dt):
-    client.send_target(*target_world())
+    client.send_target(*screen_to_world(target_win))
     process_packets(client)
 
 
@@ -355,10 +457,9 @@ print('player name:', client.player.nick)
 
 try:
     client.connect(*find_server())
-except:
+except ConnectionResetError:
     client.connect(*find_server())
 
+pyglet.clock.schedule_interval(on_tick, 1./60.)
 window.set_visible(True)
-
-pyglet.clock.schedule_interval(on_tick, 1./30.)
 pyglet.app.run()
