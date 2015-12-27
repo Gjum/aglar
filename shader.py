@@ -1,13 +1,8 @@
-#
 # Copyright Tristam Macdonald 2008.
-#
-# Updated 2015 to Python 3
-#
 # Distributed under the Boost Software License, Version 1.0
 # (see http://www.boost.org/LICENSE_1_0.txt)
 #
 # https://swiftcoder.wordpress.com/2008/12/19/simple-glsl-wrapper-for-pyglet/
-#
 
 from pyglet.gl import *
 from ctypes import *
