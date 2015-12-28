@@ -87,8 +87,8 @@ def on_resize(width, height):
 def rect_corners(top_left, bottom_right):
     l, t = top_left
     r, b = bottom_right
-    t = client.player.world.center.y - t
-    b = client.player.world.center.y - b
+    t = client.world.center.y - t
+    b = client.world.center.y - b
     return (
         l, t,
         r, t,
@@ -97,7 +97,7 @@ def rect_corners(top_left, bottom_right):
     )
 
 def rect(x, y, r, ry=None):
-    y = client.player.world.center.y - y
+    y = client.world.center.y - y
     if ry is None:
         ry = r
     return (
@@ -184,20 +184,15 @@ def set_hud_projection():
     gl.glOrtho(0, win_size.x, 0, win_size.y, -1, 1)
     gl.glMatrixMode(gl.GL_MODELVIEW)
 
-class CellDrawer(object):
-    """
-    Collects all cells and groups them into batches to increase performance.
-    """
+def draw_cells():
+    # gather cell data, draw all in one batch
+    cell_groups = defaultdict(lambda: ([], []))
+    cell_name_batch = pyglet.graphics.Batch()
+    cell_info_batch = pyglet.graphics.Batch()
 
-    def __init__(self):
-        self.data = defaultdict(lambda: ([], []))
-        self.cells = []
-
-    def add_cell(self, cell):
-        self.cells.append(cell)
-
+    for cell in sorted(client.world.cells.values()):
         texture = get_skin_tex(cell.name, synchronous=True)  # xxx async pliz
-        vertices, colors = self.data[texture]
+        vertices, colors = cell_groups[texture]
 
         vertices.extend(rect(*cell.pos, r=cell.size))
 
@@ -205,30 +200,14 @@ class CellDrawer(object):
         color.append(float(not texture))  # mark textured cells
         colors.extend(color*4)
 
-    def draw_all_cells(self):
-        set_world_projection()
+        cell.draw_text(show_cell_names and cell_name_batch,
+                       show_cell_info and cell_info_batch)
 
-        # circles
-        shader_circle_tex.bind()
-        for texture in self.data:
-            self.draw_similar_cells(texture)
-        shader_circle_tex.unbind()
+    # draw cell circles
+    shader_circle_tex.bind()
 
-        # names + info
-        cell_name_batch = pyglet.graphics.Batch()
-        cell_info_batch = pyglet.graphics.Batch()
-        for cell in self.cells:
-            cell.draw_text(show_cell_names and cell_name_batch,
-                           show_cell_info and cell_info_batch)
-        cell_name_batch.draw()
-        cell_info_batch.draw()
-
-        # data changes every frame
-        self.data.clear()
-        self.cells.clear()
-
-    def draw_similar_cells(self, texture):
-        vertices, colors = self.data[texture]
+    for texture in cell_groups:
+        vertices, colors = cell_groups[texture]
 
         # convert all cell data into one batch
         batch = pyglet.graphics.Batch()
@@ -241,14 +220,17 @@ class CellDrawer(object):
         if texture:
             gl.glBindTexture(texture.target, texture.id)
 
-        # shader.uniformf('pixel', 1.0/width, 1.0/height) xxx
-
         # draw all cells at once
         batch.draw()
 
         if texture:
             gl.glBindTexture(texture.target, 0)  # unbind
 
+    shader_circle_tex.unbind()
+
+    # draw cell names + info
+    cell_name_batch.draw()
+    cell_info_batch.draw()
 
 def set_minimap_projection():
     # third of window height, bottom-right corner
@@ -269,7 +251,7 @@ def draw_minimap():
 
     vertices, colors = [],[]
     num_cells = 0
-    for cell in client.player.world.cells.values():
+    for cell in client.world.cells.values():
         if cell.is_food or cell.is_ejected_mass: continue
         num_cells += 1
 
@@ -285,7 +267,7 @@ def draw_minimap():
               ('c4f', colors),
               ('t2f', (0,0, 1,0, 1,1, 0,1)*num_cells))
 
-    world = client.player.world
+    world = client.world
     # background
     pyglet.graphics.draw(4, gl.GL_QUADS,
          ('v2f', rect_corners(world.top_left, world.bottom_right)),
@@ -313,20 +295,11 @@ def on_draw():
     # world border
     gl.glLineWidth(1)
     pyglet.graphics.draw(4, gl.GL_LINE_LOOP,
-        ('v2f', rect_corners(client.player.world.top_left,
-                             client.player.world.bottom_right)),
+        ('v2f', rect_corners(client.world.top_left,
+                             client.world.bottom_right)),
         ('c4f', tuple([1.,1.,1., .1]*4)))
 
-    # cells
-
-    # gather cell data, draw later using batch
-    cell_drawer = CellDrawer()
-
-    # the real cells
-    for c in sorted(client.player.world.cells.values()):
-        cell_drawer.add_cell(c)
-
-    cell_drawer.draw_all_cells()
+    draw_cells()
 
     draw_minimap()
 
