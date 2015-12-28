@@ -17,12 +17,11 @@ from agarnet.vec import Vec
 
 from shader import Shader
 
-# TODO stats:
+# TODO stats in official version:
 #   food+cells eaten
 #   time alive
 #   highest mass
-#   leaderboard time
-#   top position
+#   leaderboard time, best position
 
 skin_texture_cache = {}
 
@@ -30,6 +29,8 @@ def get_skin_tex(name, synchronous=False):
     name = name.lower()
     if name not in special_names:
         return None
+
+    # TODO custom skins: official, agariomods, ZeachCobbler
 
     if name not in skin_texture_cache:
         # load in separate thread, return None for now
@@ -164,6 +165,7 @@ def screen_to_world(screen_pos):
     scale = max(*win_size.vdiv(foo_size)) * client.player.scale
     return Vec(screen_pos - win_size / 2) / scale + client.player.center
 
+
 def set_world_projection():
     center = client.player.center
     horz_vp = min(foo_size.x, foo_size.y * win_size.x / win_size.y)
@@ -178,11 +180,13 @@ def set_world_projection():
     gl.glTranslatef(-center.x, center.y, 0)
     gl.glMatrixMode(gl.GL_MODELVIEW)
 
+
 def set_hud_projection():
     gl.glMatrixMode(gl.GL_PROJECTION)
     gl.glLoadIdentity()
     gl.glOrtho(0, win_size.x, 0, win_size.y, -1, 1)
     gl.glMatrixMode(gl.GL_MODELVIEW)
+
 
 def draw_cells():
     # gather cell data, draw all in one batch
@@ -204,6 +208,7 @@ def draw_cells():
                        show_cell_info and cell_info_batch)
 
     # draw cell circles
+    # TODO faster shader for untextured cells, maybe draw food as polygons
     shader_circle_tex.bind()
 
     for texture in cell_groups:
@@ -232,6 +237,7 @@ def draw_cells():
     cell_name_batch.draw()
     cell_info_batch.draw()
 
+
 def set_minimap_projection():
     # third of window height, bottom-right corner
     y = 3 * client.world.size.y
@@ -244,10 +250,9 @@ def set_minimap_projection():
     gl.glTranslatef(-top_left.x, top_left.y, 0)
     gl.glMatrixMode(gl.GL_MODELVIEW)
 
+
 def draw_minimap():
     if not client.world.size: return
-
-    set_minimap_projection()
 
     vertices, colors = [],[]
     num_cells = 0
@@ -258,7 +263,7 @@ def draw_minimap():
         vertices.extend(rect(*cell.pos, r=cell.size))
 
         color = list(cell.color)
-        color.append(1.0)  # xxx mark as hollow
+        color.append(1.0)  # TODO only draw circle outline, do not fill
         colors.extend(color*4)
 
     batch = pyglet.graphics.Batch()
@@ -301,49 +306,54 @@ def on_draw():
 
     draw_cells()
 
+    set_minimap_projection()
     draw_minimap()
 
     # HUD
-
     set_hud_projection()
+    draw_mass_graph()
+    draw_leaderboard()
+    draw_fps()
 
-    # mass graph
+
+def draw_mass_graph():
     if mass_graph:
         mass_verts = []
-        dx = win_size.x / 3 / len(mass_graph)
-        ay = win_size.y / 3 / max(mass_graph)
+        mass_graph_size = foo_size.y / 6
+        dx = mass_graph_size / len(mass_graph)
+        dy = mass_graph_size / max(mass_graph)
         for i, mass in enumerate(mass_graph):
-            mass_verts.append(win_size.x * 2/3 + i * dx)
-            mass_verts.append(mass * ay)
+            mass_verts.append(i * dx + win_size.x - mass_graph_size)
+            mass_verts.append(mass * dy)
         gl.glLineWidth(3)
-        gl.glColor4f(0,0,1, 1)
-        pyglet.graphics.draw(len(mass_graph), gl.GL_LINE_STRIP, ('v2f', mass_verts))
+        gl.glColor4f(0, 0, 1, 1)
+        pyglet.graphics.draw(
+            len(mass_graph), gl.GL_LINE_STRIP, ('v2f', mass_verts))
         gl.glLineWidth(1)
 
-    # leaderboard
-    leaderboard_text = '\n'.join('%s (%i)' % (name,pos+1) for pos,(id,name) in
+
+def draw_leaderboard():
+    # TODO highlight own position and nearby players
+    leaderboard_text = '\n'.join('%s (%i)' % (name, pos+1) for pos,(_,name) in
                                  enumerate(client.world.leaderboard_names))
     if leaderboard_label.text != leaderboard_text:
         leaderboard_label.text = leaderboard_text  # causes recalculation
     leaderboard_label.draw()
 
-    # measure performance
-    if show_fps:
-        global last_frame
-        now = time.time()
-        frame_fps = 1/(now - last_frame)
-        last_frame = now
 
+def draw_fps():
+    if show_fps:
         pyglet.text.Label(
-            '%.2f' % frame_fps, font_size=20, color=(255,255,0,255),
-            x=0, y=win_size.y,
-            anchor_x='left', anchor_y='top').draw()
+            '%i fps' % pyglet.clock.get_fps(),
+            x=0, y=win_size.y / 2, color=(255, 255, 0, 255),
+            anchor_x='left', anchor_y='center', font_size=20).draw()
+
 
 show_cell_names = True
 show_cell_info = True
-show_fps = True
+show_fps = False
 last_frame = time.time()
-
+mass_graph = []
 leaderboard_label = pyglet.text.Label(
     '', x=win_size.x, y=win_size.y, width=win_size.x, font_size=15,
     multiline=True, align='right', anchor_x='right', anchor_y='top')
@@ -400,8 +410,6 @@ class Subscriber(object):
         if client.player.is_alive:
             mass_graph.append(client.player.total_mass)
 
-mass_graph = []
-
 def process_packets(client, timeout=0.001):
     # process all waiting packets, but do not block
     while True:
@@ -411,7 +419,7 @@ def process_packets(client, timeout=0.001):
         elif e:
             client.subscriber.on_sock_error(e)
         else:
-            break  # no packet received
+            break  # all waiting packets processed
 
 def on_tick(dt):
     client.send_target(*screen_to_world(target_win))
