@@ -159,14 +159,6 @@ class CustomCell(agarnet.world.Cell):
                 info += ' %i%%' % pct_max
         return info
 
-class CC(CustomCell):  # xxx testing
-    def __init__(self, pos, size, color, name):
-        super().__init__()
-        self.pos = Vec(pos)
-        self.size = size
-        self.color = color
-        self.name = name
-
 
 def screen_to_world(screen_pos):
     scale = max(*win_size.vdiv(foo_size)) * client.player.scale
@@ -329,31 +321,6 @@ def on_draw():
 
     # gather cell data, draw later using batch
     cell_drawer = CellDrawer()
-
-    # xxx testing: frame with lying eight of varying nr of cells in window center
-
-    import math
-    eight_radius = 1920/2
-    n = 0  # used at the end for perf
-
-    def spam(amount, size):
-        nonlocal n
-        n += amount
-        for i in range(amount):
-            angle = i * 6.283 / amount  # normalize to circle
-            angle *= .99  # gap
-            angle += time.time()  # rotate over time
-            pos = Vec(eight_radius * math.cos(angle),
-                      1080/1920 * eight_radius * math.sin(2*angle))  # lying eight
-            pos += client.player.center
-            cell_drawer.add_cell(CC(pos, size, (1.,.5,0.),
-                                    ('brazil', 'doge', 'sdfsd')[i % 3]))
-
-    # spam(int(time.time()*50) % 500, 200)
-    # spam(9, 150)
-    # spam(7, 1500)
-    # spam(200, 200)
-    # spam(500, 5)
 
     # the real cells
     for c in sorted(client.player.world.cells.values()):
